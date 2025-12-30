@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LilPop Dodge</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+
+<!-- Pixelify Sans font -->
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --player:#9e004f;
+  --accent:#ff0080;
+}
+
+*{
+  box-sizing:border-box;
+  font-family:'Pixelify Sans', sans-serif;
+}
+
+html,body{
+  margin:0;
+  height:100%;
+  overflow:hidden;
+  touch-action:none; /* IMPORTANT FOR MOBILE */
+}
+
+/* Game background */
+#game{
+  width:100vw;
+  height:100vh;
+  position:relative;
+  background-image:url("https://img.freepik.com/free-photo/blurred-pop-abstract-background-pink_58702-1699.jpg?semt=ais_hybrid&w=740&q=80");
+  background-size:cover;
+  background-position:center;
+}
+
+#player{
+  position:absolute;
+  width:70px;
+  height:16px;
+  bottom:12px;
+  border-radius:50px;
+  background:var(--player);
+  box-shadow:0 0 12px #fff;
+}
+
+/* Lollipop hazard */
+.hazard{
+  position:absolute;
+  border-radius:50%;
+  background:repeating-conic-gradient(pink 0deg 30deg, white 30deg 60deg);
+  box-shadow:0 0 16px #fff;
+}
+
+.hazard::after{
+  content:"";
+  position:absolute;
+  bottom:-10px;
+  left:50%;
+  transform:translateX(-50%);
+  width:6px;
+  height:20px;
+  background:#d4a373;
+  border-radius:3px;
+}
+
+/* Shake */
+@keyframes shake{
+  0%{transform:translate(0)}
+  25%{transform:translate(-8px)}
+  50%{transform:translate(8px)}
+  75%{transform:translate(-5px)}
+  100%{transform:translate(0)}
+}
+.shake{animation:shake 400ms}
+
+/* Overlay */
+.overlay{
+  position:fixed;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:20px;
+  text-align:center;
+  z-index:2;
+}
+
+#start{
+  background-image:url("https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRVjjMdlx7dcbDNfA9hAUoeJoAcejv4lopymg&s");
+  background-size:cover;
+  background-position:center;
+}
+
+#start::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,0.5);
+}
+
+#start>*{
+  position:relative;
+  z-index:1;
+}
+
+.title{
+  font-size:42px;
+  color:var(--accent);
+}
+
+.overlay p{
+  font-size:20px;
+  color:#fff;
+}
+
+.btn{
+  font-size:22px;
+  padding:10px 24px;
+  border:none;
+  border-radius:8px;
+  background:linear-gradient(135deg,#ff008c,#ff83bb);
+  color:#fff;
+}
+
+/* HUD */
+.hud{
+  position:fixed;
+  top:14px;
+  left:14px;
+  display:none;
+  flex-direction:column;
+  gap:6px;
+  color:#fff;
+  z-index:3;
+  font-size:18px;
+}
+
+.lives{
+  display:flex;
+  gap:6px;
+}
+
+.lifeIcon{
+  width:22px;
+  height:22px;
+}
+
+.hidden{display:none}
+</style>
+</head>
+<body>
+
+<div class="hud" id="hud">
+  <div id="score">Score: 0</div>
+  <div id="high">High: 0</div>
+  <div class="lives" id="lives"></div>
+  <div>Move: A/D | ← → | Tap screen</div>
+  <div>Pause: P | 2 fingers</div>
+  <div id="pausedTip" class="hidden">PAUSED</div>
+</div>
+
+<div id="game">
+  <div id="player"></div>
+</div>
+
+<div class="overlay" id="start">
+  <div class="title">Kendi Dodge</div>
+  <p>Avoid catching the Kendi, Survive as long as you can</p>
+  <button class="btn" id="play">PLAY</button>
+</div>
+
+<div class="overlay hidden" id="over">
+  <div class="title">Game Over</div>
+  <p id="finalScore"></p>
+  <p id="bestScore"></p>
+  <button class="btn" id="restart">PLAY AGAIN</button>
+</div>
+
+<script>
+/* ===== ELEMENTS ===== */
+const game = document.getElementById("game");
+const player = document.getElementById("player");
+const hud = document.getElementById("hud");
+const scoreEl = document.getElementById("score");
+const highEl = document.getElementById("high");
+const livesEl = document.getElementById("lives");
+const startScreen = document.getElementById("start");
+const overScreen = document.getElementById("over");
+const pausedTip = document.getElementById("pausedTip");
+
+/* ===== GAME STATE ===== */
+let running=false, paused=false;
+let score=0, high=0, lives=3;
+let hazards=[];
+let spawnTimer=0;
+let spawnInterval=900;
+let speedBase=3;
+let lastTime=0;
+
+const input={left:false,right:false};
+const playerSpeed=7;
+
+/* ===== HELPERS ===== */
+const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+const rect=e=>e.getBoundingClientRect();
+const rnd=(a,b)=>Math.random()*(b-a)+a;
+
+/* ===== LIVES ===== */
+function updateLives(){
+  livesEl.innerHTML="";
+  for(let i=0;i<lives;i++){
+    const img=document.createElement("img");
+    img.src="https://t3.ftcdn.net/jpg/06/17/39/98/360_F_617399817_gaEEOpsv2rPFpBjLYWYXeklmpb5cwDG9.jpg";
+    img.className="lifeIcon";
+    livesEl.appendChild(img);
+  }
+}
+
+/* ===== RESET ===== */
+function resetGame(){
+  hazards.forEach(h=>h.el.remove());
+  hazards=[];
+  score=0;
+  lives=3;
+  spawnTimer=0;
+  running=true;
+  paused=false;
+
+  hud.style.display="flex";
+  pausedTip.classList.add("hidden");
+
+  scoreEl.textContent="Score: 0";
+  highEl.textContent="High: "+high;
+
+  updateLives();
+  centerPlayer();
+
+  lastTime=performance.now();
+  requestAnimationFrame(loop);
+}
+
+/* ===== PLAYER ===== */
+function centerPlayer(){
+  player.style.left=(window.innerWidth/2-player.offsetWidth/2)+"px";
+}
+
+/* ===== HAZARD ===== */
+function spawnHazard(){
+  const el=document.createElement("div");
+  el.className="hazard";
+  const size=rnd(40,80);
+  el.style.width=el.style.height=size+"px";
+  el.style.left=rnd(0,window.innerWidth-size)+"px";
+  el.style.top=-(size+10)+"px";
+  game.appendChild(el);
+  hazards.push({el,vy:rnd(speedBase,speedBase+2)});
+}
+
+/* ===== GAME LOOP ===== */
+function loop(now){
+  if(!running) return;
+  const dt=now-lastTime;
+  lastTime=now;
+
+  if(!paused){
+    let px=player.offsetLeft;
+    if(input.left) px-=playerSpeed;
+    if(input.right) px+=playerSpeed;
+    player.style.left=clamp(px,0,window.innerWidth-player.offsetWidth)+"px";
+
+    spawnTimer+=dt;
+    if(spawnTimer>spawnInterval){
+      spawnTimer=0;
+      spawnHazard();
+    }
+
+    const pr=rect(player);
+    for(let i=hazards.length-1;i>=0;i--){
+      const h=hazards[i];
+      h.el.style.top=h.el.offsetTop+h.vy+"px";
+      const hr=rect(h.el);
+
+      if(hr.top>window.innerHeight){
+        h.el.remove();
+        hazards.splice(i,1);
+        score++;
+        if(score>high) high=score;
+        scoreEl.textContent="Score: "+score;
+        highEl.textContent="High: "+high;
+      }
+      else if(
+        hr.left<pr.right &&
+        hr.right>pr.left &&
+        hr.top<pr.bottom &&
+        hr.bottom>pr.top
+      ){
+        h.el.remove();
+        hazards.splice(i,1);
+        lives--;
+        updateLives();
+        document.body.classList.add("shake");
+        setTimeout(()=>document.body.classList.remove("shake"),400);
+        if(lives<=0) endGame();
+      }
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ===== GAME OVER ===== */
+function endGame(){
+  running=false;
+  hud.style.display="none";
+  document.getElementById("finalScore").textContent="Score: "+score;
+  document.getElementById("bestScore").textContent="High: "+high;
+  overScreen.classList.remove("hidden");
+}
+
+/* ===== KEYBOARD ===== */
+window.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft"||e.key==="a") input.left=true;
+  if(e.key==="ArrowRight"||e.key==="d") input.right=true;
+  if(e.key.toLowerCase()==="p"){
+    paused=!paused;
+    pausedTip.classList.toggle("hidden",!paused);
+  }
+});
+window.addEventListener("keyup",e=>{
+  if(e.key==="ArrowLeft"||e.key==="a") input.left=false;
+  if(e.key==="ArrowRight"||e.key==="d") input.right=false;
+});
+
+/* ===== TOUCH (MOBILE) ===== */
+document.addEventListener("touchmove",e=>e.preventDefault(),{passive:false});
+
+window.addEventListener("touchstart",e=>{
+  if(!running) return;
+
+  if(e.touches.length===2){
+    paused=!paused;
+    pausedTip.classList.toggle("hidden",!paused);
+    return;
+  }
+
+  const x=e.touches[0].clientX;
+  input.left = x < window.innerWidth/2;
+  input.right = x >= window.innerWidth/2;
+},{passive:false});
+
+window.addEventListener("touchend",()=>{
+  input.left=false;
+  input.right=false;
+});
+
+/* ===== BUTTONS ===== */
+document.getElementById("play").onclick=()=>{
+  startScreen.classList.add("hidden");
+  resetGame();
+};
+document.getElementById("restart").onclick=()=>{
+  overScreen.classList.add("hidden");
+  resetGame();
+};
+
+window.addEventListener("resize",centerPlayer);
+</script>
+</body>
+</html>
